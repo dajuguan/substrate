@@ -3621,6 +3621,7 @@ dependencies = [
 name = "node-testing"
 version = "2.0.0"
 dependencies = [
+ "criterion 0.3.1",
  "frame-support",
  "frame-system",
  "node-executor",
@@ -3638,7 +3639,10 @@ dependencies = [
  "pallet-treasury",
  "parity-scale-codec",
  "sc-client",
+ "sc-client-api",
+ "sc-client-db",
  "sc-executor",
+ "sp-consensus",
  "sp-core",
  "sp-io",
  "sp-keyring",
