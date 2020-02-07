@@ -78,7 +78,7 @@ pub(crate) fn to_execution_result<E: Ext>(
 	match runtime.special_trap {
 		// The trap was the result of the execution `return` host function.
 		Some(SpecialTrap::Return(data)) => return Ok(ExecReturnValue { status: STATUS_SUCCESS, data }),
-		Some(SpecialTrap::OutOfGas) => return Err(ExecError { reason: "out of gas".into(), buffer: runtime.scratch_buf }),
+		Some(SpecialTrap::OutOfGas) => return Err(ExecError { reason: "ran out of gas during contract execution".into(), buffer: runtime.scratch_buf }),
 		_ => (),
 	}
 
