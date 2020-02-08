@@ -39,9 +39,11 @@ sp-finality-tracker = { version = "2.0.0", default-features = false, path = "../
 sp-timestamp = { version = "2.0.0", default-features = false, path = "../../../primitives/timestamp" }
 sp-block-builder = { version = "2.0.0", path = "../../../primitives/block-builder" }
 sp-inherents = { version = "2.0.0", path = "../../../primitives/inherents" }
+sp-blockchain = { version = "2.0.0", path = "../../../primitives/blockchain" }
 
 [dev-dependencies]
 criterion = "0.3.0"
+tempdir = "0.3"
 
 [[bench]]
 name = "import"

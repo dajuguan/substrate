@@ -3644,6 +3644,7 @@ dependencies = [
  "sc-executor",
  "sp-api",
  "sp-block-builder",
+ "sp-blockchain",
  "sp-consensus",
  "sp-core",
  "sp-finality-tracker",
@@ -3653,6 +3654,7 @@ dependencies = [
  "sp-runtime",
  "sp-timestamp",
  "substrate-test-client",
+ "tempdir",
  "wabt",
 ]
 
@@ -7744,6 +7746,16 @@ name = "target_info"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c63f48baada5c52e65a29eef93ab4f8982681b67f9e8d29c7b05abcfec2b9ffe"
+
+[[package]]
+name = "tempdir"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15f2b5fb00ccdf689e0149d1b1b3c03fead81c2b37735d812fa8bddbbf41b6d8"
+dependencies = [
+ "rand 0.4.6",
+ "remove_dir_all",
+]
 
 [[package]]
 name = "tempfile"

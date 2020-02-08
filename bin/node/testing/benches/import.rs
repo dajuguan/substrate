@@ -36,7 +36,10 @@ use node_testing::client::{Client, Backend, Transaction};
 use node_testing::keyring::*;
 use sc_client_db::PruningMode;
 use sc_executor::{NativeExecutor, RuntimeInfo, WasmExecutionMethod, Externalities};
-use sp_consensus::{SelectChain, BlockOrigin, BlockImport, BlockImportParams, ForkChoiceStrategy};
+use sp_consensus::{
+	SelectChain, BlockOrigin, BlockImport, BlockImportParams,
+	ForkChoiceStrategy, ImportResult, ImportedAux
+};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use sp_runtime::{
 	generic::BlockId,
@@ -56,6 +59,7 @@ use sp_core::ExecutionContext;
 use sp_api::ProvideRuntimeApi;
 use sp_block_builder::BlockBuilder;
 use sp_inherents::InherentData;
+use sc_client_api::{Backend as _};
 
 criterion_group!(benches, bench_block_import);
 criterion_main!(benches);
@@ -68,6 +72,8 @@ fn sign(xt: CheckedExtrinsic, genesis_hash: [u8; 32], version: u32) -> Unchecked
 	node_testing::keyring::sign(xt, version, genesis_hash)
 }
 
+struct Guard(tempdir::TempDir);
+
 // This should return client that is doing everything that full node
 // is doing.
 //
@@ -75,32 +81,34 @@ fn sign(xt: CheckedExtrinsic, genesis_hash: [u8; 32], version: u32) -> Unchecked
 //     (TODO: configure zero rocksdb block cache)
 // - This client should use best wasm execution method.
 // - This client should work with real database only.
-fn bench_client() -> (Client, std::sync::Arc<Backend>) {
-	let path = std::path::PathBuf::from("/tmp/sub-bench");
+fn bench_client() -> (Client, std::sync::Arc<Backend>, Guard) {
+	let dir = tempdir::TempDir::new("sub-bench").expect("temp dir creation failed");
 
 	let db_config = sc_client_db::DatabaseSettings {
 		state_cache_size: 0,
 		state_cache_child_ratio: Some((0, 100)),
 		pruning: PruningMode::ArchiveAll,
 		source: sc_client_db::DatabaseSettingsSrc::Path {
-			path: path.clone(),
+			path: dir.path().into(),
 			cache_size: None,
 		},
 	};
 
-	sc_client_db::new_client(
+	let (client, backend) = sc_client_db::new_client(
 		db_config,
 		NativeExecutor::new(WasmExecutionMethod::Compiled, None),
 		&genesis(),
 		None,
 		None,
 		Default::default(),
-	).expect("Should not fail")
+	).expect("Should not fail");
+
+	(client, backend, Guard(dir))
 }
 
 // Full (almost) block generation. This is expected to be roughly
 // equal to the block which is hitting weight limit.
-fn generate_block_import(client: &Client) -> BlockImportParams<Block, Transaction> {
+fn generate_block_import(client: &Client) -> Block {
 	let version = client.runtime_version_at(&BlockId::number(0))
 		.expect("There should be runtime version at 0")
 		.spec_version;
@@ -131,29 +139,42 @@ fn generate_block_import(client: &Client) -> BlockImportParams<Block, Transactio
 		block.push(extrinsic).expect("Push inherent failed");
 	}
 
-	let nonce = 0u32;
+	let mut nonce = 0u32;
+	for _ in 0..1000 {
+		let signed = sign(
+			CheckedExtrinsic {
+				signed: Some((charlie(), signed_extra(nonce, 1*DOLLARS))),
+				function: Call::Balances(
+					BalancesCall::transfer(
+						pallet_indices::address::Address::Id(bob()),
+						1*DOLLARS
+					)
+				),
+			}, genesis_hash, version);
+		let encoded = Encode::encode(&signed);
 
-	let signed = sign(
-		CheckedExtrinsic {
-			signed: Some((alice(), signed_extra(nonce, 1*DOLLARS))),
-			function: Call::Balances(
-				BalancesCall::transfer(
-					pallet_indices::address::Address::Id(bob()),
-					1*DOLLARS
-				)
-			),
-		}, genesis_hash, version);
-	let encoded = Encode::encode(&signed);
+		let opaque = OpaqueExtrinsic::decode(&mut &encoded[..])
+			.expect("Failed  to decode opaque");
 
-	let opaque = OpaqueExtrinsic::decode(&mut &encoded[..])
-		.expect("Failed  to decode opaque");
+		match block.push(opaque) {
+			Err(sp_blockchain::Error::ApplyExtrinsicFailed(
+					sp_blockchain::ApplyExtrinsicFailed::Validity(e)
+			)) if e.exhausted_resources() => {
+				break;
+			},
+			Err(err) => panic!("Error pushing transaction: {:?}", err),
+			Ok(_) => {},
+		}
+		nonce += 1;
+	}
 
-	block.push(opaque).expect("Push transaction failed");
+	block.build().expect("Block build failed").block
+}
 
-	let block = block.build().expect("Block build failed").block;
-
-	BlockImportParams {
-		origin: BlockOrigin::File,
+// Import generated block.
+fn import_block(client: &mut Client, block: Block) {
+	let import_params = BlockImportParams {
+		origin: BlockOrigin::NetworkBroadcast,
 		header: block.header().clone(),
 		post_digests: Default::default(),
 		body: Some(block.extrinsics().to_vec()),
@@ -165,17 +186,46 @@ fn generate_block_import(client: &Client) -> BlockImportParams<Block, Transactio
 		fork_choice: Some(ForkChoiceStrategy::LongestChain),
 		allow_missing_state: false,
 		import_existing: false,
-	}
-}
+	};
 
-// Import generated block.
-fn import_block(client: &mut Client) {
-	let block = generate_block_import(client);
-	client.import_block(block, Default::default())
-		.expect("Failed to import block");
+	assert_eq!(
+		client.import_block(import_params, Default::default())
+			.expect("Failed to import block"),
+		ImportResult::Imported(
+			ImportedAux {
+				header_only: false,
+				clear_justification_requests: false,
+				needs_justification: false,
+				bad_justification: false,
+				needs_finality_proof: false,
+				is_new_best: true,
+			}
+		)
+	);
+
+	assert_eq!(client.chain_info().best_number, 1);
 }
 
 fn bench_block_import(c: &mut Criterion) {
-	let (mut client, backend) = bench_client();
-	import_block(&mut client);
+	let block = {
+		let (mut client, backend, _guard) = bench_client();
+		generate_block_import(&client)
+	};
+
+	c.bench_function("import block", move |bencher| {
+		bencher.iter_custom(
+			|f| {
+				let (mut client, backend, _guard) = bench_client();
+				let start = std::time::Instant::now();
+				import_block(&mut client, block.clone());
+				let elapsed = start.elapsed();
+				println!("Backend iteration usage info: {}",
+					backend.usage_info()
+						.expect("Rocksdb backend should gather all data")
+				);
+
+				elapsed
+			}
+		);
+	});
 }
