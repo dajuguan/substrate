@@ -55,7 +55,7 @@ impl Default for ExecutionStrategies {
 		ExecutionStrategies {
 			syncing: ExecutionStrategy::NativeElseWasm,
 			importing: ExecutionStrategy::NativeElseWasm,
-			block_construction: ExecutionStrategy::AlwaysWasm,
+			block_construction: ExecutionStrategy::NativeWhenPossible,
 			offchain_worker: ExecutionStrategy::NativeWhenPossible,
 			other: ExecutionStrategy::NativeElseWasm,
 		}
